@@ -42,46 +42,7 @@ extern "C" {
 #include <sys/queue.h>
 #include <errno.h>
 #include <unistd.h>
-
-#define SHM_RING_BASE_ADDR   0x6ee000000000
-
-#ifndef SHM_NAMESIZE
-#define SHM_NAMESIZE 32 /**< The maximum length of a ring name. */
-#endif
-
-#ifndef RING_CACHE_LINE_SIZE
-#define RING_CACHE_LINE_SIZE 64                  /**< Cache line size. */
-#define RING_CACHE_LINE_MASK (RING_CACHE_LINE_SIZE-1) /**< Cache line mask. */
-#define __ring_cache_aligned __attribute__((__aligned__(RING_CACHE_LINE_SIZE)))
-#endif
-/**
- * Check if a branch is likely to be taken.
- *
- * This compiler builtin allows the developer to indicate if a branch is
- * likely to be taken. Example:
- *
- *   if (likely(x > 1))
- *      do_stuff();
- *
- */
-#ifndef likely
-#define likely(x)  __builtin_expect((x),1)
-#endif /* likely */
-
-/**
- * Check if a branch is unlikely to be taken.
- *
- * This compiler builtin allows the developer to indicate if a branch is
- * unlikely to be taken. Example:
- *
- *   if (unlikely(x < 1))
- *      do_stuff();
- *
- */
-#ifndef unlikely
-#define unlikely(x)  __builtin_expect((x),0)
-#endif /* unlikely */
-
+#include "shm_common.h"
 
 #ifdef __SSE2__
 #include <emmintrin.h>
@@ -97,52 +58,6 @@ ue_pause (void)
 static inline void
 ue_pause(void) {}
 #endif
-
-#ifndef MPLOCKED
-#define MPLOCKED        "lock ; "       /**< Insert MP lock prefix. */
-#endif
-
-#define SHM_RING_FORCE_INTRINSICS 0
-
-/*------------------------- 32 bit atomic operations -------------------------*/
-
-/**
- * Atomic compare and set.
- *
- * (atomic) equivalent to:
- *   if (*dst == exp)
- *     *dst = src (all 32-bit words)
- *
- * @param dst
- *   The destination location into which the value will be written.
- * @param exp
- *   The expected value.
- * @param src
- *   The new value.
- * @return
- *   Non-zero on success; 0 on failure.
- */
-static inline int
-shm_ring_atomic32_cmpset(volatile uint32_t *dst, uint32_t exp, uint32_t src)
-{
-#ifndef SHM_RING_FORCE_INTRINSICS
-    uint8_t res;
-
-    asm volatile(
-            MPLOCKED
-            "cmpxchgl %[src], %[dst];"
-            "sete %[res];"
-            : [res] "=a" (res),     /* output */
-              [dst] "=m" (*dst)
-            : [src] "r" (src),      /* input */
-              "a" (exp),
-              "m" (*dst)
-            : "memory");            /* no-clobber list */
-    return res;
-#else
-    return __sync_bool_compare_and_swap(dst, exp, src);
-#endif
-}
 
 enum shm_ring_queue_behavior {
 	SHM_RING_QUEUE_FIXED = 0, /* Enq/Deq a fixed number of items from a ring */
@@ -164,7 +79,7 @@ struct shm_ring_debug_stats {
 	uint64_t deq_success_objs; /**< Objects successfully dequeued. */
 	uint64_t deq_fail_bulk;    /**< Failed dequeues number. */
 	uint64_t deq_fail_objs;    /**< Objects that failed to be dequeued. */
-} __ring_cache_aligned;
+} __shm_cache_aligned;
 #endif
 
 /**
@@ -190,7 +105,7 @@ typedef struct shm_ring {
 		uint32_t mask;           /**< Mask (size-1) of ring. */
 		volatile uint32_t head;  /**< Producer head. */
 		volatile uint32_t tail;  /**< Producer tail. */
-	} prod __ring_cache_aligned;
+	} prod __shm_cache_aligned;
 
 	/** Ring consumer status. */
 	struct cons {
@@ -200,7 +115,7 @@ typedef struct shm_ring {
 		volatile uint32_t head;  /**< Consumer head. */
 		volatile uint32_t tail;  /**< Consumer tail. */
 #ifdef SHM_RING_SPLIT_PROD_CONS
-	} cons __ring_cache_aligned;
+	} cons __shm_cache_aligned;
 #else
 	} cons;
 #endif
@@ -210,7 +125,7 @@ typedef struct shm_ring {
 #endif
     void * mempool;
 
-	void * ring[0] __ring_cache_aligned; /**< Memory space of ring starts here.
+	void * ring[0] __shm_cache_aligned; /**< Memory space of ring starts here.
 	 	 	 	 	 	 	 	 	 	 * not volatile so need to be careful
 	 	 	 	 	 	 	 	 	 	 * about compiler re-ordering */
 }shm_ring_t;
@@ -435,7 +350,7 @@ __shm_ring_mp_do_enqueue(shm_ring_t *r, void *const *obj_table,
 		}
 
 		prod_next = prod_head + n;
-		success = shm_ring_atomic32_cmpset(&r->prod.head, prod_head,
+		success = shm_atomic32_cmpset(&r->prod.head, prod_head,
 					      prod_next);
 	} while (unlikely(success == 0));
 
@@ -614,7 +529,7 @@ __shm_ring_mc_do_dequeue(shm_ring_t *r, void **obj_table,
 		}
 
 		cons_next = cons_head + n;
-		success = shm_ring_atomic32_cmpset(&r->cons.head, cons_head,
+		success = shm_atomic32_cmpset(&r->cons.head, cons_head,
 					      cons_next);
 	} while (unlikely(success == 0));
 

@@ -145,13 +145,13 @@ shm_elemt_t * shm_mempool_alloc(shm_mempool_t *mempool)
             //printf ("%s:%d shm_mempool remain [\033[1;31m failed \033[0m]: [nb_elemts: %d, total_used: %d]\n", __FILE__, __LINE__, mempool->nb_elemts, mempool->total_used);
             return NULL;
         }
-		success = shm_mempool_atomic32_cmpset(&mempool->total_used, used_cur, used_next);
+		success = shm_atomic32_cmpset(&mempool->total_used, used_cur, used_next);
 	} while (unlikely(success == 0));
 
 	do {
 		pos_cur = mempool->pos;
 		pos_next = pos_cur + 1;
-		success = shm_mempool_atomic32_cmpset(&mempool->pos, pos_cur, pos_next);
+		success = shm_atomic32_cmpset(&mempool->pos, pos_cur, pos_next);
 	} while (unlikely(success == 0));
 
 	pos = pos_cur & mempool->mask; 
@@ -195,7 +195,7 @@ void shm_mempool_free(shm_elemt_t * elemt)
 	do {
 		used_cur = mempool->total_used;
 		used_next = used_cur - 1;
-		success = shm_mempool_atomic32_cmpset(&mempool->total_used, used_cur, used_next);
+		success = shm_atomic32_cmpset(&mempool->total_used, used_cur, used_next);
 	} while (unlikely(success == 0));
 
     elemt->used = 0;
